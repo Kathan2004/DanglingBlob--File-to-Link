@@ -171,26 +171,43 @@ async function loadHistory(cursor = null) {
     query.set('cursor', cursor);
   }
 
-  const response = await fetch(getEndpointUrl('history', query), {
-    method: 'GET',
-    credentials: 'include'
-  });
+  try {
+    const response = await fetch(getEndpointUrl('history', query), {
+      method: 'GET',
+      credentials: 'include'
+    });
 
-  if (response.status === 401) {
-    window.location.href = APP_ROUTES.admin;
-    return;
+    if (response.status === 401) {
+      window.location.href = APP_ROUTES.admin;
+      return;
+    }
+
+    if (!response.ok) {
+      const errorText = await response.text();
+      throw new Error(`Server error (${response.status}): ${errorText || 'No message'}`);
+    }
+
+    const text = await response.text();
+    if (!text) {
+      throw new Error('Empty response from server');
+    }
+
+    let payload;
+    try {
+      payload = JSON.parse(text);
+    } catch {
+      throw new Error(`Invalid JSON response: ${text.substring(0, 100)}`);
+    }
+
+    renderHistory(payload.items || []);
+    renderMetrics(payload.metrics || {});
+    nextCursor = payload.cursor || null;
+    renderPagination();
+    setStatus(`Loaded ${Array.isArray(payload.items) ? payload.items.length : 0} upload entries.`);
+  } catch (error) {
+    setStatus(`Error: ${error.message}`);
+    console.error('History fetch error:', error);
   }
-
-  const payload = await response.json().catch(() => ({}));
-  if (!response.ok) {
-    throw new Error(payload.error || 'Failed to load history.');
-  }
-
-  renderHistory(payload.items || []);
-  renderMetrics(payload.metrics || {});
-  nextCursor = payload.cursor || null;
-  renderPagination();
-  setStatus(`Loaded ${Array.isArray(payload.items) ? payload.items.length : 0} upload entries.`);
 }
 
 function showQrCode(link) {
