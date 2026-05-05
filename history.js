@@ -27,6 +27,13 @@ if (backToUploadLink) {
   backToUploadLink.href = APP_ROUTES.admin;
 }
 
+console.log('History page loaded. Elements found:', {
+  statusEl: !!statusEl,
+  historyTableBody: !!historyTableBody,
+  logoutBtn: !!logoutBtn,
+  qrModal: !!qrModal
+});
+
 function setStatus(message) {
   if (statusEl) {
     statusEl.textContent = message;
@@ -255,7 +262,9 @@ async function checkAuthAndLoad() {
     }
 
     await loadHistory(null);
-  } catch {
+  } catch (error) {
+    setStatus(`Auth check error: ${error.message}`);
+    console.error('Auth check error:', error);
     window.location.href = APP_ROUTES.admin;
   }
 }
