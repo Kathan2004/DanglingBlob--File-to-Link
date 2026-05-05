@@ -2,6 +2,10 @@ import { APP_ROUTES, getEndpointUrl } from './app-config.js';
 
 const logoutBtn = document.getElementById('logoutBtn');
 const statusEl = document.getElementById('status');
+const qrModal = document.getElementById('qrModal');
+const qrCanvas = document.getElementById('qrCanvas');
+const qrLinkText = document.getElementById('qrLinkText');
+const closeQrModal = document.getElementById('closeQrModal');
 const historyTableBody = document.getElementById('historyTableBody');
 const metricTotalUploads = document.getElementById('metricTotalUploads');
 const metricStorageUsed = document.getElementById('metricStorageUsed');
@@ -118,8 +122,9 @@ function renderHistory(items) {
           <td data-label="Download Name">${downloadName}</td>
           <td data-label="Download Link"><a href="${link}" target="_blank" rel="noopener noreferrer">${link}</a></td>
           <td data-label="Actions">
-            <button class="action-btn" data-action="revoke" data-token="${token}" data-index-key="${indexKey}">Revoke Link</button>
-            <button class="action-btn danger-btn" data-action="delete-file" data-token="${token}" data-index-key="${indexKey}">Delete Link + File</button>
+            <button class="action-btn" data-action="qr-code" data-link="${link}">QR Code</button>
+            <button class="action-btn" data-action="revoke" data-token="${token}" data-index-key="${indexKey}">Revoke</button>
+            <button class="action-btn danger-btn" data-action="delete-file" data-token="${token}" data-index-key="${indexKey}">Delete</button>
           </td>
         </tr>
       `;
@@ -188,6 +193,38 @@ async function loadHistory(cursor = null) {
   setStatus(`Loaded ${Array.isArray(payload.items) ? payload.items.length : 0} upload entries.`);
 }
 
+function showQrCode(link) {
+  if (!link || link === '#') return;
+  
+  qrLinkText.textContent = link;
+  qrModal.classList.add('visible');
+  
+  try {
+    QRCode.toCanvas(qrCanvas, link, {
+      errorCorrectionLevel: 'H',
+      type: 'image/png',
+      width: 300,
+      margin: 1,
+      color: {
+        dark: '#0b1020',
+        light: '#ffffff'
+      }
+    });
+  } catch (error) {
+    setStatus('Error generating QR code: ' + error.message);
+  }
+}
+
+closeQrModal?.addEventListener('click', () => {
+  qrModal.classList.remove('visible');
+});
+
+qrModal?.addEventListener('click', (e) => {
+  if (e.target === qrModal) {
+    qrModal.classList.remove('visible');
+  }
+});
+
 async function checkAuthAndLoad() {
   try {
     const response = await fetch(getEndpointUrl('adminAuth'), {
@@ -223,9 +260,18 @@ historyTableBody?.addEventListener('click', async (event) => {
   const action = target.getAttribute('data-action');
   const token = target.getAttribute('data-token') || '';
   const indexKey = target.getAttribute('data-index-key') || '';
-  if (!action || !token || isMutating) {
+  const link = target.getAttribute('data-link') || '';
+  
+  if (!action || isMutating) {
     return;
   }
+
+  if (action === 'qr-code') {
+    showQrCode(link);
+    return;
+  }
+
+  if (!token) return;
 
   const deleteFile = action === 'delete-file';
   const confirmationMessage = deleteFile

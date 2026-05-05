@@ -174,6 +174,56 @@
           font-weight: 600;
         }
       }
+      .modal {
+        display: none;
+        position: fixed;
+        inset: 0;
+        background: rgba(0, 0, 0, 0.7);
+        z-index: 1000;
+        place-items: center;
+      }
+      .modal.visible {
+        display: grid;
+      }
+      .modal-content {
+        background: #121936;
+        border: 1px solid #2c3768;
+        border-radius: 14px;
+        padding: 24px;
+        text-align: center;
+        max-width: 400px;
+      }
+      .modal-content h2 {
+        margin-top: 0;
+        color: #e7ecff;
+      }
+      #qrCanvas {
+        margin: 16px auto;
+        border: 2px solid #2c3768;
+        border-radius: 8px;
+        background: white;
+        padding: 8px;
+      }
+      .modal-actions {
+        margin-top: 16px;
+        display: flex;
+        gap: 8px;
+        justify-content: center;
+      }
+      .modal-actions button {
+        padding: 8px 16px;
+        border-radius: 6px;
+        border: none;
+        cursor: pointer;
+        font-size: 0.9rem;
+      }
+      .modal-actions .btn-close {
+        background: #2c3768;
+        color: #e7ecff;
+      }
+      .modal-actions .btn-close:hover {
+        background: #3d4a8f;
+      }
     </style>
   </head>
   <body>
@@ -240,8 +290,20 @@
       </section>
     </main>
 
+    <div id="qrModal" class="modal">
+      <div class="modal-content">
+        <h2>Share Link</h2>
+        <canvas id="qrCanvas"></canvas>
+        <p id="qrLinkText" class="muted" style="word-break: break-all; font-size: 0.85rem; margin: 12px 0;"></p>
+        <div class="modal-actions">
+          <button class="btn-close" id="closeQrModal">Close</button>
+        </div>
+      </div>
+    </div>
+
     <script type="module" src="./history.js"></script>
 
+    <script src="https://cdn.jsdelivr.net/npm/qrcode@1.5.3/build/qrcode.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/canvasparticles-js/dist/index.umd.min.js"></script>
     <script>
       new CanvasParticles('#canvas-particles', {

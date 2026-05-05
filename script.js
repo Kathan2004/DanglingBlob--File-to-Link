@@ -174,23 +174,39 @@ folderInput.addEventListener('change', () => {
   setSelection(Array.from(folderInput.files || []), true);
 });
 
-['dragenter', 'dragover'].forEach((evtName) => {
+let dragCounter = 0;
+
+['dragenter', 'dragover', 'dragleave', 'drop'].forEach((evtName) => {
   dropZone.addEventListener(evtName, (event) => {
     event.preventDefault();
-    dropZone.classList.add('drag');
+    event.stopPropagation();
+  });
+  
+  document.addEventListener(evtName, (event) => {
+    event.preventDefault();
+    event.stopPropagation();
   });
 });
 
-['dragleave', 'drop'].forEach((evtName) => {
-  dropZone.addEventListener(evtName, (event) => {
-    event.preventDefault();
+dropZone.addEventListener('dragenter', (event) => {
+  dragCounter++;
+  dropZone.classList.add('drag');
+});
+
+dropZone.addEventListener('dragleave', (event) => {
+  dragCounter--;
+  if (dragCounter === 0) {
     dropZone.classList.remove('drag');
-  });
+  }
 });
 
 dropZone.addEventListener('drop', (event) => {
+  dragCounter = 0;
+  dropZone.classList.remove('drag');
   const files = Array.from(event.dataTransfer?.files || []);
-  setSelection(files, files.some((f) => f.webkitRelativePath));
+  if (files.length) {
+    setSelection(files, files.some((f) => f.webkitRelativePath));
+  }
 });
 
 async function buildPayloadFile(files) {
