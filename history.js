@@ -1,10 +1,5 @@
 import { APP_ROUTES, getEndpointUrl } from './app-config.js';
 
-const loginBox = document.getElementById('loginBox');
-const historyBox = document.getElementById('historyBox');
-const usernameInput = document.getElementById('usernameInput');
-const passwordInput = document.getElementById('passwordInput');
-const loginBtn = document.getElementById('loginBtn');
 const logoutBtn = document.getElementById('logoutBtn');
 const statusEl = document.getElementById('status');
 const historyTableBody = document.getElementById('historyTableBody');
@@ -32,11 +27,6 @@ function setStatus(message) {
   if (statusEl) {
     statusEl.textContent = message;
   }
-}
-
-function setAuthenticatedUI(isAuthenticated) {
-  loginBox?.classList.toggle('hidden', isAuthenticated);
-  historyBox?.classList.toggle('hidden', !isAuthenticated);
 }
 
 function escapeHtml(value) {
@@ -182,8 +172,7 @@ async function loadHistory(cursor = null) {
   });
 
   if (response.status === 401) {
-    setAuthenticatedUI(false);
-    setStatus('Please login to view upload history.');
+    window.location.href = APP_ROUTES.admin;
     return;
   }
 
@@ -207,72 +196,22 @@ async function checkAuthAndLoad() {
     });
 
     if (!response.ok) {
-      setAuthenticatedUI(false);
-      setStatus('Please login to view upload history.');
+      window.location.href = APP_ROUTES.admin + '?next=' + encodeURIComponent(window.location.pathname);
       return;
     }
 
-    setAuthenticatedUI(true);
     await loadHistory(null);
   } catch {
-    setAuthenticatedUI(false);
-    setStatus('Unable to verify authentication.');
+    window.location.href = APP_ROUTES.admin;
   }
 }
-
-loginBtn?.addEventListener('click', async () => {
-  const username = (usernameInput?.value || '').trim();
-  const password = passwordInput?.value || '';
-
-  if (!username || !password) {
-    setStatus('Enter username and password.');
-    return;
-  }
-
-  loginBtn.disabled = true;
-  setStatus('Signing in...');
-
-  try {
-    const response = await fetch(getEndpointUrl('adminAuth'), {
-      method: 'POST',
-      credentials: 'include',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ username, password })
-    });
-
-    const result = await response.json().catch(() => ({}));
-    if (!response.ok) {
-      throw new Error(result.error || 'Login failed');
-    }
-
-    setAuthenticatedUI(true);
-    if (passwordInput) {
-      passwordInput.value = '';
-    }
-    cursorStack.length = 0;
-    pageNumber = 1;
-    await loadHistory(null);
-  } catch (error) {
-    setStatus(`Error: ${error.message}`);
-  } finally {
-    loginBtn.disabled = false;
-  }
-});
 
 logoutBtn?.addEventListener('click', async () => {
   await fetch(getEndpointUrl('adminAuth'), {
     method: 'DELETE',
     credentials: 'include'
   });
-  setAuthenticatedUI(false);
-  renderHistory([]);
-  renderMetrics({});
-  currentCursor = null;
-  nextCursor = null;
-  pageNumber = 1;
-  cursorStack.length = 0;
-  renderPagination();
-  setStatus('Logged out.');
+  window.location.href = APP_ROUTES.admin;
 });
 
 historyTableBody?.addEventListener('click', async (event) => {
