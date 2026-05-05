@@ -220,6 +220,12 @@ async function loadHistory(cursor = null) {
 function showQrCode(link) {
   if (!link || link === '#') return;
   
+  if (typeof QRCode === 'undefined') {
+    setStatus('QR code library loading, please try again...');
+    setTimeout(() => showQrCode(link), 200);
+    return;
+  }
+  
   qrLinkText.textContent = link;
   qrModal.classList.add('visible');
   

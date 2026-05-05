@@ -55,6 +55,31 @@ function sanitizeDownloadName(name) {
   return name.trim().replace(/[^a-zA-Z0-9._-]/g, '_');
 }
 
+function generateQRCode(canvas, url) {
+  if (!canvas || !url) return;
+  
+  if (typeof QRCode === 'undefined') {
+    console.warn('QRCode library not loaded yet, waiting...');
+    setTimeout(() => generateQRCode(canvas, url), 100);
+    return;
+  }
+  
+  try {
+    QRCode.toCanvas(canvas, url, {
+      errorCorrectionLevel: 'H',
+      type: 'image/png',
+      width: 300,
+      margin: 1,
+      color: {
+        dark: '#0b1020',
+        light: '#ffffff'
+      }
+    });
+  } catch (error) {
+    console.error('Error generating QR code:', error);
+  }
+}
+
 async function readJsonOrText(response) {
   const raw = await response.text();
   if (!raw) {
@@ -279,20 +304,7 @@ uploadBtn.addEventListener('click', async () => {
     resultLink.href = shareUrl.toString();
     resultLink.textContent = shareUrl.toString();
     
-    try {
-      QRCode.toCanvas(resultQrCanvas, shareUrl.toString(), {
-        errorCorrectionLevel: 'H',
-        type: 'image/png',
-        width: 300,
-        margin: 1,
-        color: {
-          dark: '#0b1020',
-          light: '#ffffff'
-        }
-      });
-    } catch (qrError) {
-      console.error('Error generating QR code:', qrError);
-    }
+    generateQRCode(resultQrCanvas, shareUrl.toString());
     
     resultBox.hidden = false;
     setStatus('Upload complete. Share the link below.');
