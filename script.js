@@ -10,6 +10,7 @@ const selection = document.getElementById('selection');
 const statusEl = document.getElementById('status');
 const resultBox = document.getElementById('resultBox');
 const resultLink = document.getElementById('resultLink');
+const resultQrCanvas = document.getElementById('resultQrCanvas');
 const copyBtn = document.getElementById('copyBtn');
 const downloadBtn = document.getElementById('downloadBtn');
 const downloadNameInput = document.getElementById('downloadNameInput');
@@ -277,6 +278,22 @@ uploadBtn.addEventListener('click', async () => {
 
     resultLink.href = shareUrl.toString();
     resultLink.textContent = shareUrl.toString();
+    
+    try {
+      QRCode.toCanvas(resultQrCanvas, shareUrl.toString(), {
+        errorCorrectionLevel: 'H',
+        type: 'image/png',
+        width: 300,
+        margin: 1,
+        color: {
+          dark: '#0b1020',
+          light: '#ffffff'
+        }
+      });
+    } catch (qrError) {
+      console.error('Error generating QR code:', qrError);
+    }
+    
     resultBox.hidden = false;
     setStatus('Upload complete. Share the link below.');
   } catch (error) {

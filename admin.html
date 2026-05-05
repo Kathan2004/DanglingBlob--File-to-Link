@@ -91,6 +91,18 @@
       code {
         color: #b6c9ff;
       }
+      .result-qr {
+        margin: 16px 0;
+        text-align: center;
+      }
+      #resultQrCanvas {
+        border: 2px solid #2c3768;
+        border-radius: 8px;
+        background: white;
+        padding: 8px;
+        max-width: 250px;
+        height: auto;
+      }
     </style>
   </head>
   <body>
@@ -142,6 +154,10 @@
       <section class="output" id="resultBox" hidden>
         <div><strong>Link:</strong></div>
         <a id="resultLink" href="#" target="_blank" rel="noopener noreferrer"></a>
+        <div class="result-qr">
+          <canvas id="resultQrCanvas"></canvas>
+          <p class="muted" style="font-size: 0.85rem; margin-top: 8px;">Scan to download</p>
+        </div>
         <div class="row" style="margin-top:10px;">
           <button id="copyBtn">Copy Link</button>
           <button id="downloadBtn">Download From Link</button>
@@ -152,6 +168,7 @@
     </main>
 
     <script src="https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/qrcode@1.5.3/build/qrcode.min.js"></script>
     <script type="module" src="./script.js"></script>
 
     <script src="https://cdn.jsdelivr.net/npm/canvasparticles-js/dist/index.umd.min.js"></script>
