@@ -47,6 +47,15 @@ function setStatus(message) {
   statusEl.textContent = message;
 }
 
+function escapeHtml(value) {
+  return String(value)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+}
+
 function sanitizeDownloadName(name) {
   return name.trim().replace(/[^a-zA-Z0-9._-]/g, '_');
 }
