@@ -106,6 +106,30 @@
         color: #8fb2ff;
         word-break: break-all;
       }
+      .expiry-badge {
+        display: inline-block;
+        padding: 4px 8px;
+        border-radius: 999px;
+        font-size: 0.78rem;
+        font-weight: 700;
+        letter-spacing: 0.2px;
+        border: 1px solid transparent;
+      }
+      .expiry-active {
+        color: #b8ffd8;
+        background: rgba(34, 148, 91, 0.22);
+        border-color: rgba(104, 224, 162, 0.5);
+      }
+      .expiry-expired {
+        color: #ffd0d0;
+        background: rgba(168, 51, 51, 0.26);
+        border-color: rgba(255, 140, 140, 0.45);
+      }
+      .expiry-never {
+        color: #dde2ff;
+        background: rgba(113, 129, 194, 0.25);
+        border-color: rgba(176, 190, 255, 0.38);
+      }
       .action-btn {
         border: 1px solid #4f68d9;
         background: #2a3ea7;
@@ -118,6 +142,21 @@
       .danger-btn {
         border-color: #b64f4f;
         background: #7d2f2f;
+      }
+      .controls-row {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        gap: 8px;
+        margin-top: 10px;
+      }
+      .checkbox-cell {
+        width: 42px;
+      }
+      .checkbox-cell input[type='checkbox'] {
+        width: 16px;
+        height: 16px;
+        accent-color: #4f68d9;
       }
       .pager {
         margin-top: 12px;
@@ -174,56 +213,6 @@
           font-weight: 600;
         }
       }
-      .modal {
-        display: none;
-        position: fixed;
-        inset: 0;
-        background: rgba(0, 0, 0, 0.7);
-        z-index: 1000;
-        place-items: center;
-      }
-      .modal.visible {
-        display: grid;
-      }
-      .modal-content {
-        background: #121936;
-        border: 1px solid #2c3768;
-        border-radius: 14px;
-        padding: 24px;
-        text-align: center;
-        max-width: 400px;
-      }
-      .modal-content h2 {
-        margin-top: 0;
-        color: #e7ecff;
-      }
-      #qrCanvas {
-        margin: 16px auto;
-        border: 2px solid #2c3768;
-        border-radius: 8px;
-        background: white;
-        padding: 8px;
-      }
-      .modal-actions {
-        margin-top: 16px;
-        display: flex;
-        gap: 8px;
-        justify-content: center;
-      }
-      .modal-actions button {
-        padding: 8px 16px;
-        border-radius: 6px;
-        border: none;
-        cursor: pointer;
-        font-size: 0.9rem;
-      }
-      .modal-actions .btn-close {
-        background: #2c3768;
-        color: #e7ecff;
-      }
-      .modal-actions .btn-close:hover {
-        background: #3d4a8f;
-      }
     </style>
   </head>
   <body>
@@ -270,12 +259,21 @@
           </article>
         </section>
 
+        <div class="controls-row">
+          <label class="muted" for="selectAllCheckbox">
+            <input id="selectAllCheckbox" type="checkbox" /> Select all on page
+          </label>
+          <button id="bulkDeleteBtn" class="danger-btn" disabled>Delete Selected + Files</button>
+        </div>
+
         <table>
           <thead>
             <tr>
+              <th class="checkbox-cell">Sel</th>
               <th>Uploaded At</th>
               <th>Stored Filename</th>
               <th>Download Name</th>
+              <th>Expiry</th>
               <th>Download Link</th>
               <th>Actions</th>
             </tr>
@@ -289,20 +287,7 @@
         </div>
       </section>
     </main>
-
-    <div id="qrModal" class="modal">
-      <div class="modal-content">
-        <h2>Share Link</h2>
-        <canvas id="qrCanvas"></canvas>
-        <p id="qrLinkText" class="muted" style="word-break: break-all; font-size: 0.85rem; margin: 12px 0;"></p>
-        <div class="modal-actions">
-          <button class="btn-close" id="closeQrModal">Close</button>
-        </div>
-      </div>
-    </div>
-
-    <script src="https://cdn.jsdelivr.net/npm/qrcode@1.5.3/build/qrcode.min.js" defer></script>
-    <script src="https://cdn.jsdelivr.net/npm/canvasparticles-js/dist/index.umd.min.js" defer></script>
+    <script src="https://cdn.jsdelivr.net/npm/canvasparticles-js/dist/index.umd.min.js"></script>
     <script type="module" src="/history.js"></script>
     <script>
       new CanvasParticles('#canvas-particles', {

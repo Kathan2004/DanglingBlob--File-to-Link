@@ -16,6 +16,19 @@ export default async (request) => {
     return new Response('Invalid or expired token', { status: 404 });
   }
 
+  const expiresAt = Number(linkData.expiresAt || 0);
+  if (expiresAt > 0 && Date.now() > expiresAt) {
+    await linkStore.delete(token);
+
+    const indexKey = String(linkData.indexKey || '');
+    if (indexKey) {
+      const indexStore = getStore('uploads-index');
+      await indexStore.delete(indexKey);
+    }
+
+    return new Response('Link has expired', { status: 410 });
+  }
+
   const store = getStore('uploaded-files');
   const fileData = await store.get(linkData.key, { type: 'arrayBuffer' });
 

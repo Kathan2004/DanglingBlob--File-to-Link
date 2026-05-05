@@ -91,18 +91,6 @@
       code {
         color: #b6c9ff;
       }
-      .result-qr {
-        margin: 16px 0;
-        text-align: center;
-      }
-      #resultQrCanvas {
-        border: 2px solid #2c3768;
-        border-radius: 8px;
-        background: white;
-        padding: 8px;
-        max-width: 250px;
-        height: auto;
-      }
     </style>
   </head>
   <body>
@@ -123,10 +111,7 @@
       <section id="uploaderBox" hidden>
         <div class="row" style="justify-content: space-between; align-items: center;">
           <span class="muted">Authenticated.</span>
-          <div class="row" style="margin: 0;">
-            <a id="historyNavLink" href="/admin/history" style="border: 1px solid #4f68d9; background: #2a3ea7; color: white; border-radius: 10px; padding: 10px 14px; cursor: pointer; font-weight: 600; text-decoration: none; display: inline-block;">History</a>
-            <button id="logoutBtn">Logout</button>
-          </div>
+          <button id="logoutBtn">Logout</button>
         </div>
 
       <div class="row">
@@ -149,15 +134,26 @@
         style="width:100%; margin:8px 0 12px; padding:10px 12px; border-radius:10px; border:1px solid #4f68d9; background:#0d1430; color:#e7ecff;"
       />
 
+      <label for="expiryPresetSelect" class="muted">Link expiry</label>
+      <div class="row" style="align-items: center;">
+        <select id="expiryPresetSelect" style="flex:1; min-width: 220px; padding:10px 12px; border-radius:10px; border:1px solid #4f68d9; background:#0d1430; color:#e7ecff;">
+          <option value="15m">15 minutes</option>
+          <option value="1h" selected>1 hour</option>
+          <option value="6h">6 hours</option>
+          <option value="24h">24 hours</option>
+          <option value="7d">7 days</option>
+          <option value="never">Never expire</option>
+          <option value="custom">Custom</option>
+        </select>
+        <input id="expiryCustomMinutes" type="number" min="1" max="525600" step="1" placeholder="Custom minutes" style="flex:1; min-width: 160px; padding:10px 12px; border-radius:10px; border:1px solid #4f68d9; background:#0d1430; color:#e7ecff;" disabled />
+      </div>
+      <div class="muted" id="expiryHelpText" style="margin-bottom: 8px;">Link will expire 1 hour after upload.</div>
+
       <div id="status" class="muted" style="margin:12px 0;"></div>
 
       <section class="output" id="resultBox" hidden>
         <div><strong>Link:</strong></div>
         <a id="resultLink" href="#" target="_blank" rel="noopener noreferrer"></a>
-        <div class="result-qr">
-          <canvas id="resultQrCanvas"></canvas>
-          <p class="muted" style="font-size: 0.85rem; margin-top: 8px;">Scan to download</p>
-        </div>
         <div class="row" style="margin-top:10px;">
           <button id="copyBtn">Copy Link</button>
           <button id="downloadBtn">Download From Link</button>
@@ -168,7 +164,6 @@
     </main>
 
     <script src="https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js" defer></script>
-    <script src="https://cdn.jsdelivr.net/npm/qrcode@1.5.3/build/qrcode.min.js" defer></script>
     <script type="module" src="/script.js"></script>
 
     <script src="https://cdn.jsdelivr.net/npm/canvasparticles-js/dist/index.umd.min.js"></script>

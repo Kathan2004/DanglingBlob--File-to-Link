@@ -10,17 +10,18 @@ const selection = document.getElementById('selection');
 const statusEl = document.getElementById('status');
 const resultBox = document.getElementById('resultBox');
 const resultLink = document.getElementById('resultLink');
-const resultQrCanvas = document.getElementById('resultQrCanvas');
 const copyBtn = document.getElementById('copyBtn');
 const downloadBtn = document.getElementById('downloadBtn');
 const downloadNameInput = document.getElementById('downloadNameInput');
+const expiryPresetSelect = document.getElementById('expiryPresetSelect');
+const expiryCustomMinutes = document.getElementById('expiryCustomMinutes');
+const expiryHelpText = document.getElementById('expiryHelpText');
 const loginBox = document.getElementById('loginBox');
 const uploaderBox = document.getElementById('uploaderBox');
 const usernameInput = document.getElementById('usernameInput');
 const passwordInput = document.getElementById('passwordInput');
 const loginBtn = document.getElementById('loginBtn');
 const logoutBtn = document.getElementById('logoutBtn');
-const historyNavLink = document.getElementById('historyNavLink');
 
 let selectedFiles = [];
 let pendingIdempotencyKey = '';
@@ -55,29 +56,61 @@ function sanitizeDownloadName(name) {
   return name.trim().replace(/[^a-zA-Z0-9._-]/g, '_');
 }
 
-function generateQRCode(canvas, url) {
-  if (!canvas || !url) return;
-  
-  if (typeof QRCode === 'undefined') {
-    console.warn('QRCode library not loaded yet, waiting...');
-    setTimeout(() => generateQRCode(canvas, url), 100);
+function resolveExpiryTimestampMs() {
+  const preset = String(expiryPresetSelect?.value || '1h');
+  const now = Date.now();
+  const minutesByPreset = {
+    '15m': 15,
+    '1h': 60,
+    '6h': 360,
+    '24h': 1440,
+    '7d': 10080
+  };
+
+  if (preset === 'never') {
+    return null;
+  }
+
+  if (preset === 'custom') {
+    const customMinutes = Number.parseInt(String(expiryCustomMinutes?.value || ''), 10);
+    if (!Number.isFinite(customMinutes) || customMinutes <= 0) {
+      throw new Error('Enter a valid custom expiry in minutes.');
+    }
+    return now + customMinutes * 60 * 1000;
+  }
+
+  const minutes = minutesByPreset[preset];
+  if (!minutes) {
+    return now + 60 * 60 * 1000;
+  }
+  return now + minutes * 60 * 1000;
+}
+
+function updateExpiryUI() {
+  if (!expiryPresetSelect || !expiryCustomMinutes || !expiryHelpText) {
     return;
   }
-  
-  try {
-    QRCode.toCanvas(canvas, url, {
-      errorCorrectionLevel: 'H',
-      type: 'image/png',
-      width: 300,
-      margin: 1,
-      color: {
-        dark: '#0b1020',
-        light: '#ffffff'
-      }
-    });
-  } catch (error) {
-    console.error('Error generating QR code:', error);
+
+  const preset = String(expiryPresetSelect.value || '1h');
+  const labels = {
+    '15m': '15 minutes',
+    '1h': '1 hour',
+    '6h': '6 hours',
+    '24h': '24 hours',
+    '7d': '7 days'
+  };
+
+  expiryCustomMinutes.disabled = preset !== 'custom';
+  if (preset === 'custom') {
+    expiryHelpText.textContent = 'Link will expire after the custom minutes you enter.';
+    return;
   }
+  if (preset === 'never') {
+    expiryHelpText.textContent = 'Link will not expire.';
+    return;
+  }
+
+  expiryHelpText.textContent = `Link will expire ${labels[preset] ? `in ${labels[preset]}` : 'in 1 hour'} after upload.`;
 }
 
 async function readJsonOrText(response) {
@@ -116,10 +149,6 @@ function buildUploadErrorMessage(response, payload) {
 function showAuthenticatedUI(isAuthenticated) {
   loginBox.hidden = isAuthenticated;
   uploaderBox.hidden = !isAuthenticated;
-}
-
-if (historyNavLink) {
-  historyNavLink.href = APP_ROUTES.history;
 }
 
 async function checkAuth() {
@@ -188,6 +217,9 @@ logoutBtn?.addEventListener('click', async () => {
 });
 
 checkAuth();
+
+expiryPresetSelect?.addEventListener('change', updateExpiryUI);
+updateExpiryUI();
 
 pickFilesBtn.addEventListener('click', () => fileInput.click());
 pickFolderBtn.addEventListener('click', () => folderInput.click());
@@ -264,6 +296,7 @@ uploadBtn.addEventListener('click', async () => {
     }
 
     const customDownloadName = sanitizeDownloadName(downloadNameInput.value || '');
+    const expiresAt = resolveExpiryTimestampMs();
     if (!pendingIdempotencyKey) {
       pendingIdempotencyKey = crypto.randomUUID();
     }
@@ -275,6 +308,9 @@ uploadBtn.addEventListener('click', async () => {
     }
     if (pendingIdempotencyKey) {
       formData.append('idempotencyKey', pendingIdempotencyKey);
+    }
+    if (expiresAt) {
+      formData.append('expiresAt', String(expiresAt));
     }
 
     setStatus('Uploading to blob store...');
@@ -303,8 +339,6 @@ uploadBtn.addEventListener('click', async () => {
 
     resultLink.href = shareUrl.toString();
     resultLink.textContent = shareUrl.toString();
-    
-    generateQRCode(resultQrCanvas, shareUrl.toString());
     
     resultBox.hidden = false;
     setStatus('Upload complete. Share the link below.');

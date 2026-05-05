@@ -110,6 +110,34 @@ async function applyDeleteStatsDelta(statsStore, indexEntry, deleteFile) {
   await statsStore.setJSON('global', next);
 }
 
+async function deleteOneHistoryItem({ token, indexKey, deleteFile, linkStore, fileStore, indexStore, statsStore }) {
+  const linkData = await linkStore.get(token, { type: 'json' });
+  if (!linkData || !linkData.key) {
+    return { token, ok: false, error: 'Link not found' };
+  }
+
+  const resolvedIndexKey = indexKey || linkData.indexKey || '';
+  const indexEntry = resolvedIndexKey
+    ? await indexStore.get(resolvedIndexKey, { type: 'json' })
+    : null;
+
+  await linkStore.delete(token);
+
+  if (deleteFile) {
+    await fileStore.delete(linkData.key);
+  }
+
+  if (resolvedIndexKey) {
+    await indexStore.delete(resolvedIndexKey);
+  }
+
+  if (indexEntry) {
+    await applyDeleteStatsDelta(statsStore, indexEntry, deleteFile);
+  }
+
+  return { token, ok: true, deletedFile: deleteFile };
+}
+
 export default async (request) => {
   if (request.method !== 'GET' && request.method !== 'DELETE') {
     return jsonResponse({ error: 'Method not allowed' }, 405);
@@ -128,36 +156,57 @@ export default async (request) => {
 
     if (request.method === 'DELETE') {
       const body = await request.json().catch(() => ({}));
+      const deleteFile = Boolean(body.deleteFile);
+
+      if (Array.isArray(body.items)) {
+        const items = body.items
+          .map((item) => ({
+            token: String(item?.token || '').trim(),
+            indexKey: String(item?.indexKey || '').trim()
+          }))
+          .filter((item) => item.token);
+
+        if (!items.length) {
+          return jsonResponse({ error: 'Missing items for bulk delete' }, 400);
+        }
+
+        const results = [];
+        for (const item of items) {
+          const result = await deleteOneHistoryItem({
+            token: item.token,
+            indexKey: item.indexKey,
+            deleteFile,
+            linkStore,
+            fileStore,
+            indexStore,
+            statsStore
+          });
+          results.push(result);
+        }
+
+        const deleted = results.filter((r) => r.ok).length;
+        return jsonResponse({ ok: true, deleted, total: results.length, results, deletedFile: deleteFile });
+      }
+
       const token = String(body.token || '').trim();
       const indexKey = String(body.indexKey || '').trim();
-      const deleteFile = Boolean(body.deleteFile);
 
       if (!token) {
         return jsonResponse({ error: 'Missing token' }, 400);
       }
 
-      const linkData = await linkStore.get(token, { type: 'json' });
-      if (!linkData || !linkData.key) {
-        return jsonResponse({ error: 'Link not found' }, 404);
-      }
+      const result = await deleteOneHistoryItem({
+        token,
+        indexKey,
+        deleteFile,
+        linkStore,
+        fileStore,
+        indexStore,
+        statsStore
+      });
 
-      const resolvedIndexKey = indexKey || linkData.indexKey || '';
-      const indexEntry = resolvedIndexKey
-        ? await indexStore.get(resolvedIndexKey, { type: 'json' })
-        : null;
-
-      await linkStore.delete(token);
-
-      if (deleteFile) {
-        await fileStore.delete(linkData.key);
-      }
-
-      if (resolvedIndexKey) {
-        await indexStore.delete(resolvedIndexKey);
-      }
-
-      if (indexEntry) {
-        await applyDeleteStatsDelta(statsStore, indexEntry, deleteFile);
+      if (!result.ok) {
+        return jsonResponse({ error: result.error || 'Link not found' }, 404);
       }
 
       return jsonResponse({ ok: true, token, deletedFile: deleteFile });
@@ -177,6 +226,7 @@ export default async (request) => {
 
       const createdAt = Number(indexEntry.createdAt || 0);
       const sizeBytes = Number(indexEntry.sizeBytes || 0);
+      const expiresAt = Number(indexEntry.expiresAt || 0) || null;
       const filename = indexEntry.filename || 'download.bin';
       const downloadName = indexEntry.downloadName || null;
       const token = String(indexEntry.token);
@@ -193,15 +243,29 @@ export default async (request) => {
         downloadName,
         contentType: indexEntry.contentType || 'application/octet-stream',
         sizeBytes,
+        expiresAt,
         url
       });
     }
 
-    if (!cursor && rows.length === 0) {
-      const legacyTokens = await listLegacyTokens(linkStore, limit);
+    if (!cursor && rows.length < limit) {
+      const tokensInRows = new Set(rows.map((row) => row.token));
+      const legacyTokens = await listLegacyTokens(linkStore, Math.max(limit * 10, 200));
       for (const token of legacyTokens) {
+        if (rows.length >= limit) {
+          break;
+        }
+
+        if (tokensInRows.has(token)) {
+          continue;
+        }
+
         const linkData = await linkStore.get(token, { type: 'json' });
         if (!linkData?.key) {
+          continue;
+        }
+
+        if (linkData.indexKey) {
           continue;
         }
 
@@ -212,6 +276,7 @@ export default async (request) => {
         const downloadName = metadata.downloadName || null;
         const sizeBytes = Number(metadata.sizeBytes || 0);
         const contentType = metadata.contentType || 'application/octet-stream';
+        const expiresAt = Number(linkData.expiresAt || 0) || null;
 
         await indexStore.setJSON(indexKey, {
           indexKey,
@@ -222,6 +287,7 @@ export default async (request) => {
           contentType,
           sizeBytes,
           createdAt,
+          expiresAt,
           revoked: false
         });
 
@@ -238,8 +304,10 @@ export default async (request) => {
           downloadName,
           contentType,
           sizeBytes,
+          expiresAt,
           url
         });
+        tokensInRows.add(token);
       }
 
       rows.sort((a, b) => b.createdAt - a.createdAt);

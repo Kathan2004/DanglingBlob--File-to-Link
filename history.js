@@ -2,10 +2,6 @@ import { APP_ROUTES, getEndpointUrl } from './app-config.js';
 
 const logoutBtn = document.getElementById('logoutBtn');
 const statusEl = document.getElementById('status');
-const qrModal = document.getElementById('qrModal');
-const qrCanvas = document.getElementById('qrCanvas');
-const qrLinkText = document.getElementById('qrLinkText');
-const closeQrModal = document.getElementById('closeQrModal');
 const historyTableBody = document.getElementById('historyTableBody');
 const metricTotalUploads = document.getElementById('metricTotalUploads');
 const metricStorageUsed = document.getElementById('metricStorageUsed');
@@ -17,22 +13,19 @@ const prevPageBtn = document.getElementById('prevPageBtn');
 const nextPageBtn = document.getElementById('nextPageBtn');
 const pageInfo = document.getElementById('pageInfo');
 const backToUploadLink = document.getElementById('backToUploadLink');
+const selectAllCheckbox = document.getElementById('selectAllCheckbox');
+const bulkDeleteBtn = document.getElementById('bulkDeleteBtn');
+
 let isMutating = false;
 let currentCursor = null;
 let nextCursor = null;
 let pageNumber = 1;
 const cursorStack = [];
+const selectedItems = new Map();
 
 if (backToUploadLink) {
   backToUploadLink.href = APP_ROUTES.admin;
 }
-
-console.log('History page loaded. Elements found:', {
-  statusEl: !!statusEl,
-  historyTableBody: !!historyTableBody,
-  logoutBtn: !!logoutBtn,
-  qrModal: !!qrModal
-});
 
 function setStatus(message) {
   if (statusEl) {
@@ -53,11 +46,30 @@ function formatDate(ms) {
   if (!ms) {
     return 'Unknown';
   }
+
   const d = new Date(ms);
   if (Number.isNaN(d.getTime())) {
     return 'Unknown';
   }
+
   return d.toLocaleString();
+}
+
+function formatExpiry(expiresAt) {
+  if (!expiresAt) {
+    return { text: 'Never', status: 'never' };
+  }
+
+  const ts = Number(expiresAt);
+  if (!Number.isFinite(ts) || ts <= 0) {
+    return { text: 'Never', status: 'never' };
+  }
+
+  if (Date.now() > ts) {
+    return { text: `Expired (${formatDate(ts)})`, status: 'expired' };
+  }
+
+  return { text: formatDate(ts), status: 'active' };
 }
 
 function formatBytes(bytes) {
@@ -69,6 +81,7 @@ function formatBytes(bytes) {
   const units = ['B', 'KB', 'MB', 'GB', 'TB'];
   let size = value;
   let unitIndex = 0;
+
   while (size >= 1024 && unitIndex < units.length - 1) {
     size /= 1024;
     unitIndex += 1;
@@ -80,14 +93,17 @@ function formatBytes(bytes) {
 
 function renderMetrics(metrics) {
   const data = metrics || {};
+
   if (metricTotalUploads) {
     metricTotalUploads.textContent = String(Number(data.totalUploads || 0));
   }
+
   if (metricStorageUsed) {
     const knownCount = Number(data.knownSizeUploads || 0);
     const unknownCount = Number(data.unknownSizeUploads || 0);
     metricStorageUsed.textContent = `${formatBytes(data.totalUsedBytes || 0)}${unknownCount > 0 ? ` (known for ${knownCount} items)` : ''}`;
   }
+
   if (metricSpaceLeft) {
     if (data.estimatedRemainingBytes === null || data.estimatedRemainingBytes === undefined) {
       metricSpaceLeft.textContent = 'Set MAX_STORAGE_MB';
@@ -95,12 +111,15 @@ function renderMetrics(metrics) {
       metricSpaceLeft.textContent = formatBytes(data.estimatedRemainingBytes);
     }
   }
+
   if (metricAvgSize) {
     metricAvgSize.textContent = formatBytes(data.averageFileBytes || 0);
   }
+
   if (metricLargestFile) {
     metricLargestFile.textContent = formatBytes(data.largestFileBytes || 0);
   }
+
   if (metricLatestUpload) {
     metricLatestUpload.textContent = formatDate(data.mostRecentUploadAt || 0);
   }
@@ -110,7 +129,7 @@ function renderHistory(items) {
   if (!historyTableBody) return;
 
   if (!Array.isArray(items) || !items.length) {
-    historyTableBody.innerHTML = '<tr><td data-label="Status" colspan="5">No uploads found yet.</td></tr>';
+    historyTableBody.innerHTML = '<tr><td data-label="Status" colspan="7">No uploads found yet.</td></tr>';
     return;
   }
 
@@ -119,17 +138,27 @@ function renderHistory(items) {
       const uploadedAt = formatDate(item.createdAt);
       const filename = escapeHtml(item.filename || 'download.bin');
       const downloadName = escapeHtml(item.downloadName || '-');
+      const expiry = formatExpiry(item.expiresAt);
+      const expiryText = escapeHtml(expiry.text);
+      const expiryClass =
+        expiry.status === 'expired'
+          ? 'expiry-expired'
+          : expiry.status === 'active'
+            ? 'expiry-active'
+            : 'expiry-never';
       const link = escapeHtml(item.url || '#');
       const token = escapeHtml(item.token || '');
       const indexKey = escapeHtml(item.indexKey || '');
+
       return `
         <tr>
+          <td class="checkbox-cell" data-label="Sel"><input type="checkbox" class="row-checkbox" data-token="${token}" data-index-key="${indexKey}" ${selectedItems.has(token) ? 'checked' : ''} /></td>
           <td data-label="Uploaded At">${uploadedAt}</td>
           <td data-label="Stored Filename">${filename}</td>
           <td data-label="Download Name">${downloadName}</td>
+          <td data-label="Expiry"><span class="expiry-badge ${expiryClass}">${expiryText}</span></td>
           <td data-label="Download Link"><a href="${link}" target="_blank" rel="noopener noreferrer">${link}</a></td>
           <td data-label="Actions">
-            <button class="action-btn" data-action="qr-code" data-link="${link}">QR Code</button>
             <button class="action-btn" data-action="revoke" data-token="${token}" data-index-key="${indexKey}">Revoke</button>
             <button class="action-btn danger-btn" data-action="delete-file" data-token="${token}" data-index-key="${indexKey}">Delete</button>
           </td>
@@ -137,6 +166,23 @@ function renderHistory(items) {
       `;
     })
     .join('');
+}
+
+function updateBulkDeleteUI() {
+  if (bulkDeleteBtn) {
+    bulkDeleteBtn.disabled = selectedItems.size === 0 || isMutating;
+    bulkDeleteBtn.textContent = selectedItems.size > 0
+      ? `Delete Selected + Files (${selectedItems.size})`
+      : 'Delete Selected + Files';
+  }
+
+  if (selectAllCheckbox && historyTableBody) {
+    const rowCheckboxes = historyTableBody.querySelectorAll('.row-checkbox');
+    const total = rowCheckboxes.length;
+    const checked = Array.from(rowCheckboxes).filter((cb) => cb.checked).length;
+    selectAllCheckbox.checked = total > 0 && checked === total;
+    selectAllCheckbox.indeterminate = checked > 0 && checked < total;
+  }
 }
 
 function renderPagination() {
@@ -167,6 +213,26 @@ async function deleteHistoryItem(token, indexKey, deleteFile) {
   if (!response.ok) {
     throw new Error(payload.error || 'Failed to update history item.');
   }
+}
+
+async function deleteHistoryItems(items, deleteFile) {
+  if (!Array.isArray(items) || !items.length) {
+    throw new Error('No selected items to delete.');
+  }
+
+  const response = await fetch(getEndpointUrl('history'), {
+    method: 'DELETE',
+    credentials: 'include',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ items, deleteFile })
+  });
+
+  const payload = await response.json().catch(() => ({}));
+  if (!response.ok) {
+    throw new Error(payload.error || 'Failed to delete selected items.');
+  }
+
+  return payload;
 }
 
 async function loadHistory(cursor = null) {
@@ -209,6 +275,7 @@ async function loadHistory(cursor = null) {
     renderHistory(payload.items || []);
     renderMetrics(payload.metrics || {});
     nextCursor = payload.cursor || null;
+    updateBulkDeleteUI();
     renderPagination();
     setStatus(`Loaded ${Array.isArray(payload.items) ? payload.items.length : 0} upload entries.`);
   } catch (error) {
@@ -216,44 +283,6 @@ async function loadHistory(cursor = null) {
     console.error('History fetch error:', error);
   }
 }
-
-function showQrCode(link) {
-  if (!link || link === '#') return;
-  
-  if (typeof QRCode === 'undefined') {
-    setStatus('QR code library loading, please try again...');
-    setTimeout(() => showQrCode(link), 200);
-    return;
-  }
-  
-  qrLinkText.textContent = link;
-  qrModal.classList.add('visible');
-  
-  try {
-    QRCode.toCanvas(qrCanvas, link, {
-      errorCorrectionLevel: 'H',
-      type: 'image/png',
-      width: 300,
-      margin: 1,
-      color: {
-        dark: '#0b1020',
-        light: '#ffffff'
-      }
-    });
-  } catch (error) {
-    setStatus('Error generating QR code: ' + error.message);
-  }
-}
-
-closeQrModal?.addEventListener('click', () => {
-  qrModal.classList.remove('visible');
-});
-
-qrModal?.addEventListener('click', (e) => {
-  if (e.target === qrModal) {
-    qrModal.classList.remove('visible');
-  }
-});
 
 async function checkAuthAndLoad() {
   try {
@@ -263,7 +292,7 @@ async function checkAuthAndLoad() {
     });
 
     if (!response.ok) {
-      window.location.href = APP_ROUTES.admin + '?next=' + encodeURIComponent(window.location.pathname);
+      window.location.href = `${APP_ROUTES.admin}?next=${encodeURIComponent(window.location.pathname)}`;
       return;
     }
 
@@ -292,14 +321,8 @@ historyTableBody?.addEventListener('click', async (event) => {
   const action = target.getAttribute('data-action');
   const token = target.getAttribute('data-token') || '';
   const indexKey = target.getAttribute('data-index-key') || '';
-  const link = target.getAttribute('data-link') || '';
-  
-  if (!action || isMutating) {
-    return;
-  }
 
-  if (action === 'qr-code') {
-    showQrCode(link);
+  if (!action || isMutating) {
     return;
   }
 
@@ -326,6 +349,83 @@ historyTableBody?.addEventListener('click', async (event) => {
   } finally {
     isMutating = false;
     target.disabled = false;
+    selectedItems.delete(token);
+    updateBulkDeleteUI();
+  }
+});
+
+historyTableBody?.addEventListener('change', (event) => {
+  const target = event.target;
+  if (!(target instanceof HTMLInputElement) || !target.classList.contains('row-checkbox')) {
+    return;
+  }
+
+  const token = target.getAttribute('data-token') || '';
+  const indexKey = target.getAttribute('data-index-key') || '';
+  if (!token) {
+    return;
+  }
+
+  if (target.checked) {
+    selectedItems.set(token, indexKey);
+  } else {
+    selectedItems.delete(token);
+  }
+
+  updateBulkDeleteUI();
+});
+
+selectAllCheckbox?.addEventListener('change', () => {
+  if (!historyTableBody) {
+    return;
+  }
+
+  const rowCheckboxes = historyTableBody.querySelectorAll('.row-checkbox');
+  rowCheckboxes.forEach((checkbox) => {
+    if (!(checkbox instanceof HTMLInputElement)) {
+      return;
+    }
+
+    checkbox.checked = selectAllCheckbox.checked;
+    const token = checkbox.getAttribute('data-token') || '';
+    const indexKey = checkbox.getAttribute('data-index-key') || '';
+    if (!token) {
+      return;
+    }
+
+    if (selectAllCheckbox.checked) {
+      selectedItems.set(token, indexKey);
+    } else {
+      selectedItems.delete(token);
+    }
+  });
+
+  updateBulkDeleteUI();
+});
+
+bulkDeleteBtn?.addEventListener('click', async () => {
+  if (isMutating || selectedItems.size === 0) {
+    return;
+  }
+
+  if (!window.confirm(`Delete ${selectedItems.size} selected link(s) and file(s) permanently?`)) {
+    return;
+  }
+
+  isMutating = true;
+  updateBulkDeleteUI();
+
+  try {
+    const items = Array.from(selectedItems.entries()).map(([token, indexKey]) => ({ token, indexKey }));
+    const result = await deleteHistoryItems(items, true);
+    selectedItems.clear();
+    setStatus(`Deleted ${Number(result.deleted || 0)} of ${Number(result.total || items.length)} selected items.`);
+    await loadHistory(currentCursor);
+  } catch (error) {
+    setStatus(`Error: ${error.message}`);
+  } finally {
+    isMutating = false;
+    updateBulkDeleteUI();
   }
 });
 
@@ -344,5 +444,4 @@ nextPageBtn?.addEventListener('click', async () => {
 });
 
 renderPagination();
-
 checkAuthAndLoad();

@@ -9,6 +9,28 @@ function sanitizeIdempotencyKey(value) {
   return String(value).trim().replace(/[^a-zA-Z0-9._-]/g, '').slice(0, 120);
 }
 
+function parseExpiryMs(value) {
+  if (value === null || value === undefined || value === '') {
+    return null;
+  }
+
+  const parsed = Number.parseInt(String(value), 10);
+  if (!Number.isFinite(parsed)) {
+    return null;
+  }
+
+  const now = Date.now();
+  const maxFutureMs = 365 * 24 * 60 * 60 * 1000;
+  if (parsed <= now) {
+    return null;
+  }
+  if (parsed > now + maxFutureMs) {
+    return now + maxFutureMs;
+  }
+
+  return parsed;
+}
+
 function jsonResponse(body, status = 200, requestId) {
   const headers = { 'content-type': 'application/json' };
   if (requestId) {
@@ -81,6 +103,7 @@ export default async (request) => {
     const formData = await request.formData();
     const file = formData.get('file');
     const requestedDownloadName = sanitizeName(String(formData.get('downloadName') || ''));
+    const expiresAt = parseExpiryMs(formData.get('expiresAt'));
     const idempotencyHeader = request.headers.get('x-idempotency-key');
     const idempotencyBody = formData.get('idempotencyKey');
     const idempotencyKey = sanitizeIdempotencyKey(idempotencyHeader || idempotencyBody || '');
@@ -123,7 +146,8 @@ export default async (request) => {
     await linkStore.setJSON(token, {
       key,
       createdAt: uploadedAt,
-      indexKey
+      indexKey,
+      expiresAt
     });
 
     await indexStore.setJSON(indexKey, {
@@ -135,6 +159,7 @@ export default async (request) => {
       contentType: file.type || 'application/octet-stream',
       sizeBytes,
       createdAt: uploadedAt,
+      expiresAt,
       revoked: false
     });
 
@@ -155,6 +180,7 @@ export default async (request) => {
       token,
       filename: originalName,
       downloadName: requestedDownloadName || null,
+      expiresAt,
       url
     };
 
