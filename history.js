@@ -5,7 +5,6 @@ const statusEl = document.getElementById('status');
 const historyTableBody = document.getElementById('historyTableBody');
 const metricTotalUploads = document.getElementById('metricTotalUploads');
 const metricStorageUsed = document.getElementById('metricStorageUsed');
-const metricSpaceLeft = document.getElementById('metricSpaceLeft');
 const metricAvgSize = document.getElementById('metricAvgSize');
 const metricLargestFile = document.getElementById('metricLargestFile');
 const metricLatestUpload = document.getElementById('metricLatestUpload');
@@ -15,6 +14,7 @@ const pageInfo = document.getElementById('pageInfo');
 const backToUploadLink = document.getElementById('backToUploadLink');
 const selectAllCheckbox = document.getElementById('selectAllCheckbox');
 const bulkDeleteBtn = document.getElementById('bulkDeleteBtn');
+const filterButtons = Array.from(document.querySelectorAll('.filter-btn'));
 
 let isMutating = false;
 let currentCursor = null;
@@ -22,6 +22,8 @@ let nextCursor = null;
 let pageNumber = 1;
 const cursorStack = [];
 const selectedItems = new Map();
+let currentItems = [];
+let activeFilter = 'all';
 
 if (backToUploadLink) {
   backToUploadLink.href = APP_ROUTES.admin;
@@ -72,6 +74,52 @@ function formatExpiry(expiresAt) {
   return { text: formatDate(ts), status: 'active' };
 }
 
+function formatPolicy(item) {
+  const parts = [];
+  if (item.passwordProtected) {
+    parts.push('Password');
+  }
+  if (item.maxDownloads) {
+    parts.push(`Max ${Number(item.maxDownloads)}`);
+  }
+  if (item.expiryMode === 'first-access') {
+    parts.push('Start on first access');
+  }
+  return parts.length ? parts.join(' • ') : 'Standard';
+}
+
+function getExpiryStatus(expiresAt) {
+  if (!expiresAt) {
+    return 'never';
+  }
+
+  const ts = Number(expiresAt);
+  if (!Number.isFinite(ts) || ts <= 0) {
+    return 'never';
+  }
+
+  if (Date.now() > ts) {
+    return 'expired';
+  }
+
+  return 'active';
+}
+
+function applyFilter(items) {
+  if (!Array.isArray(items) || !items.length || activeFilter === 'all') {
+    return items || [];
+  }
+
+  return items.filter((item) => getExpiryStatus(item.expiresAt) === activeFilter);
+}
+
+function updateFilterButtonsUI() {
+  filterButtons.forEach((btn) => {
+    const value = btn.getAttribute('data-filter') || 'all';
+    btn.classList.toggle('active', value === activeFilter);
+  });
+}
+
 function formatBytes(bytes) {
   const value = Number(bytes || 0);
   if (value <= 0) {
@@ -104,14 +152,6 @@ function renderMetrics(metrics) {
     metricStorageUsed.textContent = `${formatBytes(data.totalUsedBytes || 0)}${unknownCount > 0 ? ` (known for ${knownCount} items)` : ''}`;
   }
 
-  if (metricSpaceLeft) {
-    if (data.estimatedRemainingBytes === null || data.estimatedRemainingBytes === undefined) {
-      metricSpaceLeft.textContent = 'Set MAX_STORAGE_MB';
-    } else {
-      metricSpaceLeft.textContent = formatBytes(data.estimatedRemainingBytes);
-    }
-  }
-
   if (metricAvgSize) {
     metricAvgSize.textContent = formatBytes(data.averageFileBytes || 0);
   }
@@ -129,7 +169,11 @@ function renderHistory(items) {
   if (!historyTableBody) return;
 
   if (!Array.isArray(items) || !items.length) {
-    historyTableBody.innerHTML = '<tr><td data-label="Status" colspan="7">No uploads found yet.</td></tr>';
+    const label = activeFilter === 'all'
+      ? 'No uploads found yet.'
+      : `No ${activeFilter} uploads on this page.`;
+    historyTableBody.innerHTML = `<tr><td data-label="Status" colspan="10">${label}</td></tr>`;
+    updateBulkDeleteUI();
     return;
   }
 
@@ -140,12 +184,15 @@ function renderHistory(items) {
       const downloadName = escapeHtml(item.downloadName || '-');
       const expiry = formatExpiry(item.expiresAt);
       const expiryText = escapeHtml(expiry.text);
+      const policyText = escapeHtml(formatPolicy(item));
       const expiryClass =
         expiry.status === 'expired'
           ? 'expiry-expired'
           : expiry.status === 'active'
             ? 'expiry-active'
             : 'expiry-never';
+      const downloadsText = String(Number(item.downloadCount || 0));
+      const lastAccessText = escapeHtml(formatDate(item.lastAccessedAt || 0));
       const link = escapeHtml(item.url || '#');
       const token = escapeHtml(item.token || '');
       const indexKey = escapeHtml(item.indexKey || '');
@@ -157,6 +204,9 @@ function renderHistory(items) {
           <td data-label="Stored Filename">${filename}</td>
           <td data-label="Download Name">${downloadName}</td>
           <td data-label="Expiry"><span class="expiry-badge ${expiryClass}">${expiryText}</span></td>
+          <td data-label="Policy">${policyText}</td>
+          <td data-label="Downloads">${downloadsText}</td>
+          <td data-label="Last Access">${lastAccessText}</td>
           <td data-label="Download Link"><a href="${link}" target="_blank" rel="noopener noreferrer">${link}</a></td>
           <td data-label="Actions">
             <button class="action-btn" data-action="revoke" data-token="${token}" data-index-key="${indexKey}">Revoke</button>
@@ -166,6 +216,12 @@ function renderHistory(items) {
       `;
     })
     .join('');
+}
+
+function renderFilteredHistory() {
+  const filtered = applyFilter(currentItems);
+  renderHistory(filtered);
+  updateBulkDeleteUI();
 }
 
 function updateBulkDeleteUI() {
@@ -187,7 +243,7 @@ function updateBulkDeleteUI() {
 
 function renderPagination() {
   if (pageInfo) {
-    pageInfo.textContent = `Page ${pageNumber}`;
+    pageInfo.textContent = nextCursor ? `Page ${pageNumber} - more available` : `Page ${pageNumber} - end`;
   }
   if (prevPageBtn) {
     prevPageBtn.disabled = cursorStack.length === 0;
@@ -238,6 +294,12 @@ async function deleteHistoryItems(items, deleteFile) {
 async function loadHistory(cursor = null) {
   setStatus('Loading upload history...');
 
+  selectedItems.clear();
+  if (selectAllCheckbox) {
+    selectAllCheckbox.checked = false;
+    selectAllCheckbox.indeterminate = false;
+  }
+
   currentCursor = cursor;
   const query = new URLSearchParams({ limit: '20' });
   if (cursor) {
@@ -272,12 +334,14 @@ async function loadHistory(cursor = null) {
       throw new Error(`Invalid JSON response: ${text.substring(0, 100)}`);
     }
 
-    renderHistory(payload.items || []);
+    currentItems = Array.isArray(payload.items) ? payload.items : [];
+    renderFilteredHistory();
     renderMetrics(payload.metrics || {});
     nextCursor = payload.cursor || null;
-    updateBulkDeleteUI();
+    updateFilterButtonsUI();
     renderPagination();
-    setStatus(`Loaded ${Array.isArray(payload.items) ? payload.items.length : 0} upload entries.`);
+    const filteredCount = applyFilter(currentItems).length;
+    setStatus(`Loaded ${filteredCount} of ${currentItems.length} upload entries on this page.`);
   } catch (error) {
     setStatus(`Error: ${error.message}`);
     console.error('History fetch error:', error);
@@ -427,6 +491,26 @@ bulkDeleteBtn?.addEventListener('click', async () => {
     isMutating = false;
     updateBulkDeleteUI();
   }
+});
+
+filterButtons.forEach((btn) => {
+  btn.addEventListener('click', () => {
+    const value = btn.getAttribute('data-filter') || 'all';
+    if (value === activeFilter) {
+      return;
+    }
+
+    activeFilter = value;
+    selectedItems.clear();
+    if (selectAllCheckbox) {
+      selectAllCheckbox.checked = false;
+      selectAllCheckbox.indeterminate = false;
+    }
+    updateFilterButtonsUI();
+    renderFilteredHistory();
+    const filteredCount = applyFilter(currentItems).length;
+    setStatus(`Showing ${filteredCount} of ${currentItems.length} entries (${activeFilter}).`);
+  });
 });
 
 prevPageBtn?.addEventListener('click', async () => {

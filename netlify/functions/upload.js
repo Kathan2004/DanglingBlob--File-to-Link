@@ -31,6 +31,41 @@ function parseExpiryMs(value) {
   return parsed;
 }
 
+function parseTtlMs(value) {
+  if (value === null || value === undefined || value === '') {
+    return null;
+  }
+
+  const parsed = Number.parseInt(String(value), 10);
+  if (!Number.isFinite(parsed) || parsed <= 0) {
+    return null;
+  }
+
+  const maxTtlMs = 365 * 24 * 60 * 60 * 1000;
+  return Math.min(parsed, maxTtlMs);
+}
+
+function parseMaxDownloads(value) {
+  if (value === null || value === undefined || value === '') {
+    return null;
+  }
+
+  const parsed = Number.parseInt(String(value), 10);
+  if (!Number.isFinite(parsed) || parsed <= 0) {
+    return null;
+  }
+
+  return Math.min(parsed, 1000000);
+}
+
+async function sha256Hex(value) {
+  const bytes = new TextEncoder().encode(String(value));
+  const digest = await crypto.subtle.digest('SHA-256', bytes);
+  return Array.from(new Uint8Array(digest))
+    .map((b) => b.toString(16).padStart(2, '0'))
+    .join('');
+}
+
 function jsonResponse(body, status = 200, requestId) {
   const headers = { 'content-type': 'application/json' };
   if (requestId) {
@@ -103,13 +138,22 @@ export default async (request) => {
     const formData = await request.formData();
     const file = formData.get('file');
     const requestedDownloadName = sanitizeName(String(formData.get('downloadName') || ''));
+    const expiryMode = String(formData.get('expiryMode') || 'fixed') === 'first-access' ? 'first-access' : 'fixed';
     const expiresAt = parseExpiryMs(formData.get('expiresAt'));
+    const ttlMs = parseTtlMs(formData.get('ttlMs'));
+    const linkPassword = String(formData.get('linkPassword') || '').trim().slice(0, 200);
+    const maxDownloads = parseMaxDownloads(formData.get('maxDownloads'));
+    const passwordHash = linkPassword ? await sha256Hex(linkPassword) : null;
     const idempotencyHeader = request.headers.get('x-idempotency-key');
     const idempotencyBody = formData.get('idempotencyKey');
     const idempotencyKey = sanitizeIdempotencyKey(idempotencyHeader || idempotencyBody || '');
 
     if (!file || typeof file.arrayBuffer !== 'function') {
       return jsonResponse({ error: 'No file uploaded' }, 400, requestId);
+    }
+
+    if (expiryMode === 'first-access' && !ttlMs) {
+      return jsonResponse({ error: 'First-access expiry requires ttlMs' }, 400, requestId);
     }
 
     const idempotencyStore = getStore('upload-idempotency');
@@ -147,7 +191,15 @@ export default async (request) => {
       key,
       createdAt: uploadedAt,
       indexKey,
-      expiresAt
+      expiresAt,
+      expiryMode,
+      ttlMs,
+      passwordHash,
+      passwordProtected: Boolean(passwordHash),
+      maxDownloads,
+      downloadCount: 0,
+      firstAccessedAt: null,
+      lastAccessedAt: null
     });
 
     await indexStore.setJSON(indexKey, {
@@ -160,6 +212,13 @@ export default async (request) => {
       sizeBytes,
       createdAt: uploadedAt,
       expiresAt,
+      expiryMode,
+      ttlMs,
+      passwordProtected: Boolean(passwordHash),
+      maxDownloads,
+      downloadCount: 0,
+      firstAccessedAt: null,
+      lastAccessedAt: null,
       revoked: false
     });
 
@@ -181,6 +240,10 @@ export default async (request) => {
       filename: originalName,
       downloadName: requestedDownloadName || null,
       expiresAt,
+      expiryMode,
+      ttlMs,
+      passwordProtected: Boolean(passwordHash),
+      maxDownloads,
       url
     };
 

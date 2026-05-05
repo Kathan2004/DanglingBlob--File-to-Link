@@ -91,6 +91,147 @@ async function listLegacyTokens(linkStore, maxItems = 50) {
   return tokens;
 }
 
+async function backfillMissingIndexEntries({ linkStore, fileStore, indexStore, maxItems = 5000 }) {
+  const legacyTokens = await listLegacyTokens(linkStore, maxItems);
+  let indexedCount = 0;
+
+  for (const token of legacyTokens) {
+    const linkData = await linkStore.get(token, { type: 'json' });
+    if (!linkData?.key) {
+      continue;
+    }
+
+    if (linkData.indexKey) {
+      continue;
+    }
+
+    const metadata = (await fileStore.getMetadata(linkData.key)) || {};
+    const createdAt = Number(linkData.createdAt || metadata.uploadedAt || Date.now());
+    const indexKey = buildIndexKey(createdAt, token);
+    const filename = metadata.filename || 'download.bin';
+    const downloadName = metadata.downloadName || null;
+    const sizeBytes = Number(metadata.sizeBytes || 0);
+    const contentType = metadata.contentType || 'application/octet-stream';
+    const expiresAt = Number(linkData.expiresAt || 0) || null;
+
+    await indexStore.setJSON(indexKey, {
+      indexKey,
+      token,
+      key: linkData.key,
+      filename,
+      downloadName,
+      contentType,
+      sizeBytes,
+      createdAt,
+      expiresAt,
+      revoked: false
+    });
+
+    await linkStore.setJSON(token, {
+      ...linkData,
+      createdAt,
+      indexKey,
+      expiresAt
+    });
+
+    indexedCount += 1;
+  }
+
+  return indexedCount;
+}
+
+async function maybeRunMaintenance({ linkStore, fileStore, indexStore, statsStore }) {
+  const maintenanceStore = getStore('maintenance-meta');
+  const key = 'history-maintenance';
+  const current = (await maintenanceStore.get(key, { type: 'json' })) || {};
+  const now = Date.now();
+  const runIntervalMs = 60 * 60 * 1000;
+
+  if (Number(current.lastRunAt || 0) > 0 && now - Number(current.lastRunAt) < runIntervalMs) {
+    return;
+  }
+
+  const retentionMs = 30 * 24 * 60 * 60 * 1000;
+  let cursor;
+  let scanned = 0;
+  let removed = 0;
+  const recomputed = {
+    totalUploads: 0,
+    totalUsedBytes: 0,
+    knownSizeUploads: 0,
+    unknownSizeUploads: 0,
+    largestFileBytes: 0,
+    mostRecentUploadAt: 0,
+    updatedAt: now
+  };
+
+  do {
+    const page = await indexStore.list({ cursor, limit: 100 });
+    const blobs = Array.isArray(page?.blobs) ? page.blobs : [];
+
+    for (const blob of blobs) {
+      scanned += 1;
+      const indexEntry = await indexStore.get(blob.key, { type: 'json' });
+      if (!indexEntry) {
+        continue;
+      }
+
+      const token = String(indexEntry.token || '');
+      const linkData = token ? await linkStore.get(token, { type: 'json' }) : null;
+      const fileKey = String(indexEntry.key || linkData?.key || '');
+      const metadata = fileKey ? await fileStore.getMetadata(fileKey) : null;
+
+      if (!linkData && !metadata) {
+        await indexStore.delete(blob.key);
+        removed += 1;
+        continue;
+      }
+
+      const expiryMode = String(linkData?.expiryMode || indexEntry.expiryMode || 'fixed');
+      const ttlMs = Number(linkData?.ttlMs || indexEntry.ttlMs || 0);
+      const firstAccessedAt = Number(linkData?.firstAccessedAt || indexEntry.firstAccessedAt || 0);
+      let expiresAt = Number(linkData?.expiresAt || indexEntry.expiresAt || 0);
+      if (expiryMode === 'first-access' && ttlMs > 0 && firstAccessedAt > 0) {
+        expiresAt = firstAccessedAt + ttlMs;
+      }
+
+      if (expiresAt > 0 && now - expiresAt > retentionMs) {
+        if (token && linkData) {
+          await linkStore.delete(token);
+        }
+        if (fileKey && metadata) {
+          await fileStore.delete(fileKey);
+        }
+        await indexStore.delete(blob.key);
+        removed += 1;
+        continue;
+      }
+
+      const sizeBytes = Number(indexEntry.sizeBytes || metadata?.sizeBytes || 0);
+      const createdAt = Number(indexEntry.createdAt || linkData?.createdAt || metadata?.uploadedAt || 0);
+      recomputed.totalUploads += 1;
+      recomputed.totalUsedBytes += Math.max(0, sizeBytes);
+      recomputed.largestFileBytes = Math.max(recomputed.largestFileBytes, Math.max(0, sizeBytes));
+      recomputed.mostRecentUploadAt = Math.max(recomputed.mostRecentUploadAt, createdAt);
+      if (sizeBytes > 0) {
+        recomputed.knownSizeUploads += 1;
+      } else {
+        recomputed.unknownSizeUploads += 1;
+      }
+    }
+
+    cursor = page?.cursor;
+  } while (cursor);
+
+  await statsStore.setJSON('global', recomputed);
+  await maintenanceStore.setJSON(key, {
+    lastRunAt: now,
+    scanned,
+    removed,
+    updatedAt: now
+  });
+}
+
 async function applyDeleteStatsDelta(statsStore, indexEntry, deleteFile) {
   const current = (await statsStore.get('global', { type: 'json' })) || {};
   const sizeBytes = Number(indexEntry?.sizeBytes || 0);
@@ -215,6 +356,11 @@ export default async (request) => {
     const requestUrl = new URL(request.url);
     const cursor = requestUrl.searchParams.get('cursor') || undefined;
     const limit = normalizeLimit(requestUrl.searchParams.get('limit'));
+    if (!cursor) {
+      await backfillMissingIndexEntries({ linkStore, fileStore, indexStore, maxItems: 5000 });
+      await maybeRunMaintenance({ linkStore, fileStore, indexStore, statsStore });
+    }
+
     const page = await indexStore.list({ cursor, limit });
     const rows = [];
 
@@ -224,12 +370,20 @@ export default async (request) => {
         continue;
       }
 
+      const token = String(indexEntry.token);
+      const linkData = await linkStore.get(token, { type: 'json' });
+
       const createdAt = Number(indexEntry.createdAt || 0);
       const sizeBytes = Number(indexEntry.sizeBytes || 0);
-      const expiresAt = Number(indexEntry.expiresAt || 0) || null;
+      const expiryMode = String(linkData?.expiryMode || indexEntry.expiryMode || 'fixed');
+      const ttlMs = Number(linkData?.ttlMs || indexEntry.ttlMs || 0) || null;
+      const firstAccessedAt = Number(linkData?.firstAccessedAt || indexEntry.firstAccessedAt || 0) || null;
+      let expiresAt = Number(linkData?.expiresAt || indexEntry.expiresAt || 0) || null;
+      if (expiryMode === 'first-access' && ttlMs && firstAccessedAt) {
+        expiresAt = firstAccessedAt + ttlMs;
+      }
       const filename = indexEntry.filename || 'download.bin';
       const downloadName = indexEntry.downloadName || null;
-      const token = String(indexEntry.token);
       const baseUrl = `${requestUrl.origin}/download/${encodeURIComponent(token)}`;
       const url = downloadName
         ? `${baseUrl}?name=${encodeURIComponent(downloadName)}`
@@ -244,73 +398,15 @@ export default async (request) => {
         contentType: indexEntry.contentType || 'application/octet-stream',
         sizeBytes,
         expiresAt,
+        expiryMode,
+        ttlMs,
+        firstAccessedAt,
+        passwordProtected: Boolean(linkData?.passwordHash || indexEntry.passwordProtected),
+        maxDownloads: Number(linkData?.maxDownloads || indexEntry.maxDownloads || 0) || null,
+        downloadCount: Number(linkData?.downloadCount || indexEntry.downloadCount || 0),
+        lastAccessedAt: Number(linkData?.lastAccessedAt || indexEntry.lastAccessedAt || 0) || null,
         url
       });
-    }
-
-    if (!cursor && rows.length < limit) {
-      const tokensInRows = new Set(rows.map((row) => row.token));
-      const legacyTokens = await listLegacyTokens(linkStore, Math.max(limit * 10, 200));
-      for (const token of legacyTokens) {
-        if (rows.length >= limit) {
-          break;
-        }
-
-        if (tokensInRows.has(token)) {
-          continue;
-        }
-
-        const linkData = await linkStore.get(token, { type: 'json' });
-        if (!linkData?.key) {
-          continue;
-        }
-
-        if (linkData.indexKey) {
-          continue;
-        }
-
-        const metadata = (await fileStore.getMetadata(linkData.key)) || {};
-        const createdAt = Number(linkData.createdAt || metadata.uploadedAt || Date.now());
-        const indexKey = buildIndexKey(createdAt, token);
-        const filename = metadata.filename || 'download.bin';
-        const downloadName = metadata.downloadName || null;
-        const sizeBytes = Number(metadata.sizeBytes || 0);
-        const contentType = metadata.contentType || 'application/octet-stream';
-        const expiresAt = Number(linkData.expiresAt || 0) || null;
-
-        await indexStore.setJSON(indexKey, {
-          indexKey,
-          token,
-          key: linkData.key,
-          filename,
-          downloadName,
-          contentType,
-          sizeBytes,
-          createdAt,
-          expiresAt,
-          revoked: false
-        });
-
-        const baseUrl = `${requestUrl.origin}/download/${encodeURIComponent(token)}`;
-        const url = downloadName
-          ? `${baseUrl}?name=${encodeURIComponent(downloadName)}`
-          : baseUrl;
-
-        rows.push({
-          indexKey,
-          token,
-          createdAt,
-          filename,
-          downloadName,
-          contentType,
-          sizeBytes,
-          expiresAt,
-          url
-        });
-        tokensInRows.add(token);
-      }
-
-      rows.sort((a, b) => b.createdAt - a.createdAt);
     }
 
     const configuredMaxStorageMb = Number(process.env.MAX_STORAGE_MB || 0);

@@ -7,12 +7,45 @@ This project includes:
 2. A backend API implementation for Netlify Functions + Netlify Blobs.
 3. A frontend config layer so the same UI can be pointed to non-Netlify backends too.
 
+## Setup
+
+### Quick Local Setup
+1. Install dependencies:
+```bash
+npm install
+```
+2. Set env vars in terminal before running:
+```powershell
+$env:ADMIN_USERNAME='Admin'
+$env:ADMIN_PASSWORD='admin'
+```
+3. Start local dev server:
+```bash
+npx netlify dev
+```
+4. Open `http://localhost:8888` and login using the env credentials.
+
+### Netlify Setup
+1. Create a Netlify site from this folder.
+2. Build command: empty (or `npm run build`).
+3. Publish directory: `.`
+4. Functions directory: `netlify/functions`.
+5. Configure env vars:
+  - `ADMIN_USERNAME=Admin`
+  - `ADMIN_PASSWORD=admin`
+  - optional `MAX_STORAGE_MB=1024`
+
 ## Features
 1. Upload a file or folder (folder uploads are zipped in-browser).
 2. Generate tokenized download links.
 3. Admin-only history page with metrics and pagination.
 4. Revoke link, or delete link + underlying file.
 5. Idempotent uploads to avoid duplicate records on retries.
+6. Time-based expiry links (preset, custom, or never).
+7. Access policies: optional password, max downloads, and first-access expiry mode.
+8. Bulk-select and bulk-delete from history.
+9. Link analytics in history (download count, first/last access).
+10. Upload UX improvements: queue, cancel/retry, file tree preview, recent session links.
 
 ## Frontend Configuration (Any Provider)
 Frontend API and route mapping is centralized in [app-config.js](app-config.js).
@@ -38,8 +71,18 @@ If you deploy backend elsewhere, keep these endpoints compatible:
   - optional `downloadName`
   - optional `idempotencyKey`
   - optional header `x-idempotency-key`
+  - optional `expiryMode` (`fixed` | `first-access`)
+  - optional `expiresAt` (epoch ms, fixed mode)
+  - optional `ttlMs` (duration ms, first-access mode)
+  - optional `linkPassword`
+  - optional `maxDownloads`
 5. `GET history?limit=<n>&cursor=<cursor>`
 6. `DELETE history` with JSON `{ token, indexKey, deleteFile }`
+7. Bulk delete: `DELETE history` with JSON `{ items: [{ token, indexKey }], deleteFile }`
+
+Download access supports:
+1. `GET /download/<token>`
+2. Optional link password via query `?password=...` or header `x-link-password`
 
 Expected response shape:
 1. Success: JSON payload with relevant fields (`url`, `items`, `metrics`, etc).
@@ -70,8 +113,11 @@ Open `http://localhost:8888`.
 4. `upload-idempotency`
 5. `upload-stats`
 6. `admin-sessions`
+7. `maintenance-meta` (lifecycle maintenance scheduling metadata)
 
 ## Notes And Limits
 1. Current architecture uploads through a serverless function.
 2. Practical request size threshold in local benchmark was about 5 MB (6 MB hit 413).
 3. For very large files, migrate upload path to direct multipart object storage uploads.
+4. Expired links return `410` and are visible in history as expired.
+5. Lifecycle maintenance runs periodically to reconcile stats and clean stale/very-old expired records.

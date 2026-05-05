@@ -81,6 +81,44 @@
         border-radius: 10px;
         padding: 12px;
       }
+      .panel {
+        background: #0d1430;
+        border: 1px solid #263263;
+        border-radius: 10px;
+        padding: 10px;
+        margin-top: 10px;
+      }
+      .panel h3 {
+        margin: 0 0 8px;
+        font-size: 0.98rem;
+        color: #d7e0ff;
+      }
+      .list {
+        margin: 0;
+        padding-left: 16px;
+      }
+      .list li {
+        margin: 4px 0;
+      }
+      .queue-item {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        gap: 8px;
+        border: 1px solid #27356d;
+        border-radius: 8px;
+        padding: 8px;
+        margin: 6px 0;
+      }
+      .queue-item .meta {
+        font-size: 0.84rem;
+        color: #aab9ff;
+      }
+      .small-btn {
+        padding: 6px 10px;
+        border-radius: 8px;
+        font-size: 0.8rem;
+      }
       .output a {
         color: #8fb2ff;
         word-break: break-all;
@@ -125,6 +163,10 @@
 
       <div id="dropZone">Drag and drop file(s) or folder here</div>
       <div id="selection" class="muted">No file selected.</div>
+      <div class="panel" id="selectionPreviewBox" hidden>
+        <h3>Selected Files Preview</h3>
+        <ul id="selectionPreviewList" class="list"></ul>
+      </div>
 
       <label for="downloadNameInput" class="muted">Custom download filename (optional)</label>
       <input
@@ -149,7 +191,42 @@
       </div>
       <div class="muted" id="expiryHelpText" style="margin-bottom: 8px;">Link will expire 1 hour after upload.</div>
 
+      <label for="expiryModeSelect" class="muted">Expiry mode</label>
+      <select id="expiryModeSelect" style="width:100%; margin:8px 0 12px; padding:10px 12px; border-radius:10px; border:1px solid #4f68d9; background:#0d1430; color:#e7ecff;">
+        <option value="fixed" selected>Fixed expiry time</option>
+        <option value="first-access">Start expiry on first download</option>
+      </select>
+
+      <label for="linkPasswordInput" class="muted">Link password (optional)</label>
+      <input
+        id="linkPasswordInput"
+        type="password"
+        placeholder="Leave blank for no password"
+        style="width:100%; margin:8px 0 12px; padding:10px 12px; border-radius:10px; border:1px solid #4f68d9; background:#0d1430; color:#e7ecff;"
+      />
+
+      <label for="maxDownloadsInput" class="muted">Max downloads (optional)</label>
+      <input
+        id="maxDownloadsInput"
+        type="number"
+        min="1"
+        step="1"
+        placeholder="Unlimited if empty"
+        style="width:100%; margin:8px 0 12px; padding:10px 12px; border-radius:10px; border:1px solid #4f68d9; background:#0d1430; color:#e7ecff;"
+      />
+
       <div id="status" class="muted" style="margin:12px 0;"></div>
+
+      <section class="panel">
+        <h3>Upload Queue</h3>
+        <div class="muted" id="queueSummary">No queued uploads.</div>
+        <div id="uploadQueueList"></div>
+      </section>
+
+      <section class="panel">
+        <h3>Recent Links (This Session)</h3>
+        <ul id="recentLinksList" class="list"></ul>
+      </section>
 
       <section class="output" id="resultBox" hidden>
         <div><strong>Link:</strong></div>
