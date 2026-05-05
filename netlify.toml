@@ -1,0 +1,31 @@
+[build]
+  publish = "."
+  functions = "netlify/functions"
+
+[functions]
+  node_bundler = "esbuild"
+
+[[redirects]]
+  from = "/"
+  to = "/index.html"
+  status = 404
+
+[[redirects]]
+  from = "/admin"
+  to = "/admin.html"
+  status = 200
+
+[[redirects]]
+  from = "/admin/history"
+  to = "/admin-history.html"
+  status = 200
+
+[[redirects]]
+  from = "/root"
+  to = "/admin.html"
+  status = 200
+
+[[redirects]]
+  from = "/download/*"
+  to = "/.netlify/functions/file?token=:splat"
+  status = 200

@@ -1,0 +1,175 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>File to Link Uploader</title>
+    <style>
+      :root {
+        font-family: Inter, system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif;
+      }
+      body {
+        margin: 0;
+        background: #0b1020;
+        color: #e7ecff;
+        min-height: 100vh;
+        display: grid;
+        place-items: center;
+        padding: 24px;
+      }
+      #canvas-particles {
+        position: fixed;
+        inset: 0;
+        width: 100%;
+        height: 100%;
+        z-index: -1;
+        pointer-events: none;
+      }
+      .card {
+        width: min(760px, 100%);
+        background: #121936;
+        border: 1px solid #2c3768;
+        border-radius: 14px;
+        padding: 20px;
+        box-shadow: 0 8px 24px rgba(0, 0, 0, 0.3);
+      }
+      h1 {
+        margin: 0 0 8px;
+        font-size: 1.4rem;
+      }
+      p {
+        margin: 0 0 14px;
+        color: #b7c4ff;
+      }
+      .row {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 10px;
+        margin-bottom: 12px;
+      }
+      button {
+        border: 1px solid #4f68d9;
+        background: #2a3ea7;
+        color: white;
+        border-radius: 10px;
+        padding: 10px 14px;
+        cursor: pointer;
+        font-weight: 600;
+      }
+      button:disabled {
+        opacity: 0.6;
+        cursor: not-allowed;
+      }
+      .muted {
+        color: #95a6f7;
+        font-size: 0.92rem;
+      }
+      #dropZone {
+        border: 2px dashed #4f68d9;
+        border-radius: 12px;
+        padding: 24px;
+        text-align: center;
+        margin: 10px 0 14px;
+        color: #a5b4ff;
+      }
+      #dropZone.drag {
+        background: rgba(79, 104, 217, 0.15);
+      }
+      .output {
+        background: #0d1430;
+        border: 1px solid #263263;
+        border-radius: 10px;
+        padding: 12px;
+      }
+      .output a {
+        color: #8fb2ff;
+        word-break: break-all;
+      }
+      .hidden {
+        display: none;
+      }
+      code {
+        color: #b6c9ff;
+      }
+    </style>
+  </head>
+  <body>
+    <canvas id="canvas-particles"></canvas>
+    <main class="card">
+      <h1>Upload to Link</h1>
+      <p>Upload a file, zip, or folder and get a shareable link instantly.</p>
+
+      <section id="loginBox">
+        <p class="muted">Login required.</p>
+        <div class="row">
+          <input id="usernameInput" type="text" placeholder="Username" style="flex:1; min-width: 180px; padding:10px 12px; border-radius:10px; border:1px solid #4f68d9; background:#0d1430; color:#e7ecff;" />
+          <input id="passwordInput" type="password" placeholder="Password" style="flex:1; min-width: 180px; padding:10px 12px; border-radius:10px; border:1px solid #4f68d9; background:#0d1430; color:#e7ecff;" />
+          <button id="loginBtn">Login</button>
+        </div>
+      </section>
+
+      <section id="uploaderBox" hidden>
+        <div class="row" style="justify-content: space-between; align-items: center;">
+          <span class="muted">Authenticated.</span>
+          <div class="row" style="margin: 0;">
+            <a id="historyNavLink" href="/admin/history" style="border: 1px solid #4f68d9; background: #2a3ea7; color: white; border-radius: 10px; padding: 10px 14px; cursor: pointer; font-weight: 600; text-decoration: none; display: inline-block;">History</a>
+            <button id="logoutBtn">Logout</button>
+          </div>
+        </div>
+
+      <div class="row">
+        <button id="pickFilesBtn">Pick File(s)</button>
+        <button id="pickFolderBtn">Pick Folder</button>
+        <button id="uploadBtn" disabled>Upload & Get Link</button>
+      </div>
+
+      <input id="fileInput" class="hidden" type="file" multiple />
+      <input id="folderInput" class="hidden" type="file" webkitdirectory directory multiple />
+
+      <div id="dropZone">Drag and drop file(s) or folder here</div>
+      <div id="selection" class="muted">No file selected.</div>
+
+      <label for="downloadNameInput" class="muted">Custom download filename (optional)</label>
+      <input
+        id="downloadNameInput"
+        type="text"
+        placeholder="example: report.zip"
+        style="width:100%; margin:8px 0 12px; padding:10px 12px; border-radius:10px; border:1px solid #4f68d9; background:#0d1430; color:#e7ecff;"
+      />
+
+      <div id="status" class="muted" style="margin:12px 0;"></div>
+
+      <section class="output" id="resultBox" hidden>
+        <div><strong>Link:</strong></div>
+        <a id="resultLink" href="#" target="_blank" rel="noopener noreferrer"></a>
+        <div class="row" style="margin-top:10px;">
+          <button id="copyBtn">Copy Link</button>
+          <button id="downloadBtn">Download From Link</button>
+        </div>
+        <div class="muted">If custom name is empty, original uploaded filename is used.</div>
+      </section>
+      </section>
+    </main>
+
+    <script src="https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js"></script>
+    <script type="module" src="./script.js"></script>
+
+    <script src="https://cdn.jsdelivr.net/npm/canvasparticles-js/dist/index.umd.min.js"></script>
+    <script>
+      new CanvasParticles('#canvas-particles', {
+        background: false,
+        particles: {
+          color: 'rgba(99, 140, 255, 0.7)',
+          ppm: 55,
+          max: 120,
+          connectDistance: 160,
+          relSpeed: 0.7,
+        },
+        mouse: {
+          interactionType: CanvasParticles.interactionType.MOVE,
+          connectDistMult: 0.75,
+        },
+      }).start()
+    </script>
+  </body>
+</html>
