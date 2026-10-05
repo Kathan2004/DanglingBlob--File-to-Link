@@ -1,6 +1,12 @@
-# File-To-Link Uploader
+# DanglingBlob: File-to-Link
 
-Browser-based uploader with admin auth, share links, and upload history.
+Self-hosted file drop that turns uploads into expiring, optionally password-protected share links. It runs on Netlify Functions and Netlify Blobs with no database. Uploads and history are admin-only; downloads are public by token.
+
+```
+admin ──login──► admin-auth ──session cookie (HttpOnly, SameSite=Strict)
+admin ──file───► upload ──► Blobs: uploaded-files + shared-links + uploads-index ──► /download/<token>
+anyone ──token (+ password via POST)──► file ──► policy checks ──► attachment response
+```
 
 This project includes:
 1. A frontend admin UI (static files).
@@ -15,9 +21,8 @@ This project includes:
 npm install
 ```
 2. Set env vars in terminal before running:
-```powershell
-$env:ADMIN_USERNAME='Admin'
-$env:ADMIN_PASSWORD='admin'
+```bash
+cp .env.example .env    # set ADMIN_USERNAME and a long random ADMIN_PASSWORD (12+ chars)
 ```
 3. Start local dev server:
 ```bash
@@ -31,8 +36,8 @@ npx netlify dev
 3. Publish directory: `.`
 4. Functions directory: `netlify/functions`.
 5. Configure env vars:
-  - `ADMIN_USERNAME=Admin`
-  - `ADMIN_PASSWORD=admin`
+  - `ADMIN_USERNAME`
+  - `ADMIN_PASSWORD` (at least 12 characters; the login refuses to work with a shorter one)
   - optional `MAX_STORAGE_MB=1024`
 
 ## Features
@@ -82,7 +87,7 @@ If you deploy backend elsewhere, keep these endpoints compatible:
 
 Download access supports:
 1. `GET /download/<token>`
-2. Optional link password via query `?password=...` or header `x-link-password`
+2. Link password via `POST /download/<token>` form field `password`, or the `x-link-password` header. Query-string passwords are not accepted because they end up in logs and browser history.
 
 Expected response shape:
 1. Success: JSON payload with relevant fields (`url`, `items`, `metrics`, etc).
@@ -94,8 +99,7 @@ Expected response shape:
 3. Publish directory: `.`
 4. Functions directory: `netlify/functions` (already in [netlify.toml](netlify.toml)).
 5. Environment variables:
-  - `ADMIN_USERNAME=Admin`
-  - `ADMIN_PASSWORD=admin`
+  - `ADMIN_USERNAME`, `ADMIN_PASSWORD` (12+ characters)
   - optional `MAX_STORAGE_MB=1024` for estimated space-left metric
 
 ## Local Run
@@ -114,6 +118,21 @@ Open `http://localhost:8888`.
 5. `upload-stats`
 6. `admin-sessions`
 7. `maintenance-meta` (lifecycle maintenance scheduling metadata)
+8. `auth-throttle` (failed-login and link-password counters)
+
+## Security
+
+- **Admin login.** Credentials are compared in constant time. Five failures per IP in 15 minutes return `429`. Sessions are random tokens stored server-side and sent as `HttpOnly; SameSite=Strict; Secure` cookies.
+- **Link passwords.** Hashed with salted scrypt. Links created before this change keep their unsalted SHA-256 hash and still verify. Ten wrong guesses lock the link for 15 minutes.
+- **Downloads.** Always served as `attachment` with an RFC 6266 filename and `nosniff`, so an uploaded HTML or SVG file cannot run in the site's origin.
+- **Response headers.** The site sends `X-Frame-Options: DENY`, `nosniff`, `no-referrer`, HSTS and a restrictive `Permissions-Policy`.
+- **Reporting.** See [SECURITY.md](SECURITY.md).
+
+## Tests
+
+```bash
+npm test
+```
 
 ## Notes And Limits
 1. Current architecture uploads through a serverless function.
