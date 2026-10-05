@@ -1,4 +1,5 @@
 import { getStore } from '@netlify/blobs';
+import { hashLinkPassword } from '../lib/security.js';
 
 function sanitizeName(name) {
   return name.replace(/[^a-zA-Z0-9._-]/g, '_');
@@ -56,14 +57,6 @@ function parseMaxDownloads(value) {
   }
 
   return Math.min(parsed, 1000000);
-}
-
-async function sha256Hex(value) {
-  const bytes = new TextEncoder().encode(String(value));
-  const digest = await crypto.subtle.digest('SHA-256', bytes);
-  return Array.from(new Uint8Array(digest))
-    .map((b) => b.toString(16).padStart(2, '0'))
-    .join('');
 }
 
 function jsonResponse(body, status = 200, requestId) {
@@ -143,7 +136,7 @@ export default async (request) => {
     const ttlMs = parseTtlMs(formData.get('ttlMs'));
     const linkPassword = String(formData.get('linkPassword') || '').trim().slice(0, 200);
     const maxDownloads = parseMaxDownloads(formData.get('maxDownloads'));
-    const passwordHash = linkPassword ? await sha256Hex(linkPassword) : null;
+    const passwordHash = linkPassword ? await hashLinkPassword(linkPassword) : null;
     const idempotencyHeader = request.headers.get('x-idempotency-key');
     const idempotencyBody = formData.get('idempotencyKey');
     const idempotencyKey = sanitizeIdempotencyKey(idempotencyHeader || idempotencyBody || '');

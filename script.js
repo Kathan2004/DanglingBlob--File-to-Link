@@ -96,7 +96,7 @@ function renderRecentLinks() {
 
   recentLinksList.innerHTML = recentLinks
     .slice(0, 12)
-    .map((item) => `<li><a href="${item.url}" target="_blank" rel="noopener noreferrer">${item.name}</a> <span class="muted">(${new Date(item.createdAt).toLocaleTimeString()})</span></li>`)
+    .map((item) => `<li><a href="${escapeHtml(item.url)}" target="_blank" rel="noopener noreferrer">${escapeHtml(item.name)}</a> <span class="muted">(${escapeHtml(new Date(item.createdAt).toLocaleTimeString())})</span></li>`)
     .join('');
 }
 
@@ -208,7 +208,7 @@ function renderSelectionPreview(files) {
   const items = files.slice(0, previewLimit).map((file) => {
     const path = file.webkitRelativePath || file.name;
     const kb = Math.max(1, Math.round((Number(file.size || 0) / 1024)));
-    return `<li>${path} <span class="muted">(${kb} KB)</span></li>`;
+    return `<li>${escapeHtml(path)} <span class="muted">(${kb} KB)</span></li>`;
   });
 
   if (files.length > previewLimit) {
@@ -367,7 +367,7 @@ function renderQueue() {
         : `${item.files.length} files`;
       const status = item.status.toUpperCase();
       const error = item.error ? `<div class="meta" style="color:#ffb3b3;">${escapeHtml(item.error)}</div>` : '';
-      const link = item.resultUrl ? `<div class="meta"><a href="${item.resultUrl}" target="_blank" rel="noopener noreferrer">Open link</a></div>` : '';
+      const link = item.resultUrl ? `<div class="meta"><a href="${escapeHtml(item.resultUrl)}" target="_blank" rel="noopener noreferrer">Open link</a></div>` : '';
       return `
         <div class="queue-item" data-id="${item.id}">
           <div>

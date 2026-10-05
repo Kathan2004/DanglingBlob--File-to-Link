@@ -1,12 +1,8 @@
 import { getStore } from '@netlify/blobs';
+import { attachmentDisposition, throttle, verifyLinkPassword } from '../lib/security.js';
 
-async function sha256Hex(value) {
-  const bytes = new TextEncoder().encode(String(value));
-  const digest = await crypto.subtle.digest('SHA-256', bytes);
-  return Array.from(new Uint8Array(digest))
-    .map((b) => b.toString(16).padStart(2, '0'))
-    .join('');
-}
+// Per-link guessing limit: 10 wrong passwords locks the link for 15 minutes.
+const linkThrottle = throttle('link-password', { maxFailures: 10, windowMs: 15 * 60 * 1000 });
 
 function escapeHtml(value) {
   return String(value || '')
@@ -44,7 +40,7 @@ function passwordPromptPage({ token, name, errorMessage = '' }) {
     <main class="card">
       <h1>Password Protected Link</h1>
       <p>Enter the password to download this file.</p>
-      <form method="GET" action="/download/${safeToken}">
+      <form method="POST" action="/download/${safeToken}">
         ${nameInput}
         <input type="password" name="password" placeholder="Password" required autofocus />
         <button type="submit">Download</button>
@@ -59,8 +55,14 @@ function passwordPromptPage({ token, name, errorMessage = '' }) {
 export default async (request) => {
   const url = new URL(request.url);
   const token = url.searchParams.get('token');
-  const queryName = url.searchParams.get('name');
-  const providedPassword = String(url.searchParams.get('password') || request.headers.get('x-link-password') || '');
+  let queryName = url.searchParams.get('name');
+  // Passwords come from a POST form body or a header, never the query string (it ends up in logs and history).
+  let providedPassword = String(request.headers.get('x-link-password') || '');
+  if (!providedPassword && request.method === 'POST') {
+    const form = await request.formData().catch(() => null);
+    providedPassword = String(form?.get('password') || '');
+    queryName = queryName || (form?.get('name') ? String(form.get('name')) : null);
+  }
   const wantsHtml = (request.headers.get('accept') || '').includes('text/html');
 
   if (!token) {
@@ -84,8 +86,11 @@ export default async (request) => {
       }
       return new Response('Password required for this link', { status: 401 });
     }
-    const providedHash = await sha256Hex(providedPassword);
-    if (providedHash !== String(linkData.passwordHash)) {
+    if (await linkThrottle.isLocked(token)) {
+      return new Response('Too many wrong passwords for this link. Try again in 15 minutes.', { status: 429 });
+    }
+    if (!(await verifyLinkPassword(providedPassword, linkData.passwordHash))) {
+      await linkThrottle.recordFailure(token);
       if (wantsHtml) {
         return new Response(passwordPromptPage({ token, name: queryName, errorMessage: 'Invalid password. Try again.' }), {
           status: 403,
@@ -158,7 +163,8 @@ export default async (request) => {
     status: 200,
     headers: {
       'content-type': contentType,
-      'content-disposition': `attachment; filename="${filename}"`,
+      'content-disposition': attachmentDisposition(filename),
+      'x-content-type-options': 'nosniff',
       'cache-control': 'private, max-age=0, must-revalidate'
     }
   });

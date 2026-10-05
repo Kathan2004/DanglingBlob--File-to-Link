@@ -1,4 +1,7 @@
 import { getStore } from '@netlify/blobs';
+import { clientIp, safeEqual, throttle } from '../lib/security.js';
+
+const loginThrottle = throttle('admin-login', { maxFailures: 5, windowMs: 15 * 60 * 1000 });
 
 function parseCookies(cookieHeader = '') {
   const cookies = {};
@@ -39,9 +42,9 @@ export default async (request) => {
   const adminUsername = process.env.ADMIN_USERNAME;
   const adminPassword = process.env.ADMIN_PASSWORD;
 
-  if (!adminUsername || !adminPassword) {
+  if (!adminUsername || !adminPassword || adminPassword.length < 12) {
     return jsonResponse(
-      { error: 'Server auth not configured. Set ADMIN_USERNAME and ADMIN_PASSWORD in Netlify environment variables.' },
+      { error: 'Server auth not configured. Set ADMIN_USERNAME and an ADMIN_PASSWORD of at least 12 characters in Netlify environment variables.' },
       500
     );
   }
@@ -75,9 +78,19 @@ export default async (request) => {
   const username = String(body.username || '');
   const password = String(body.password || '');
 
-  if (username !== adminUsername || password !== adminPassword) {
+  const ip = clientIp(request);
+  if (await loginThrottle.isLocked(ip)) {
+    return jsonResponse({ error: 'Too many failed attempts. Try again in 15 minutes.' }, 429);
+  }
+
+  // Evaluate both comparisons so timing does not reveal which field was wrong.
+  const userOk = safeEqual(username, adminUsername);
+  const passOk = safeEqual(password, adminPassword);
+  if (!(userOk && passOk)) {
+    await loginThrottle.recordFailure(ip);
     return jsonResponse({ error: 'Invalid credentials' }, 401);
   }
+  await loginThrottle.clear(ip);
 
   const token = crypto.randomUUID();
   const maxAgeSeconds = 60 * 60 * 12;
